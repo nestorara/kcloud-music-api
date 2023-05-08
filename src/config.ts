@@ -1,0 +1,10 @@
+export const PORT = process.env.PORT
+export const BUCKET_NAME = process.env.BUCKET_NAME as string
+export const BUCKET_SECRET_KEY = process.env.BUCKET_SECRET_KEY as string
+export const BUCKET_ACCESS_KEY = process.env.BUCKET_ACCESS_KEY as string
+export const BUCKET_REGION = process.env.BUCKET_REGION
+export const BUCKET_ENDPOINT = process.env.BUCKET_ENDPOINT
+export const DB_HOST = process.env.DB_HOST
+export const DB_DATABASE = process.env.DB_DATABASE
+export const DB_USER = process.env.DB_USER
+export const DB_PASSWORD = process.env.DB_PASSWORD

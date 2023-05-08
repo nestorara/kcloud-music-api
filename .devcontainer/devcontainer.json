@@ -1,0 +1,21 @@
+{
+	"name": "kcloud-music-api",
+	"dockerComposeFile": "docker-compose.yaml",
+	"service": "kcloud-music-api",
+
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"dbaeumer.vscode-eslint",
+				"esbenp.prettier-vscode",
+				"snyk-security.snyk-vulnerability-scanner"
+			]
+		}
+	},
+
+	"workspaceFolder": "/workspace",
+
+	"otherPortsAttributes": {
+		"onAutoForward": "ignore"
+	}
+}
