@@ -1,36 +1,41 @@
-import { Request, Response, Router } from "express";
+import { Router } from "express";
 
-import * as songsController from "../controllers/SongsController";
-import upload from "../libs/multer";
+import * as SongsController from "../controllers/SongsController";
+import HandleUploadError from "../middlewares/HandleUploadError";
+import * as GenericController from "../controllers/GenericController";
+import { ESongFiles } from "../types";
 
 const router = Router();
 
-// List songs from database
-router.get("/", songsController.getSongs);
+router.get("/songFile/:id", SongsController.getUrl(ESongFiles.songFile));
 
-// Download song
-router.get("/songFile/:id", songsController.getSongFile)
+router.get("/songFile", GenericController.manageIdRequiredInRoutes)
 
-// Download conver
-router.get("/cover/:id", songsController.getCover)
+router.get("/cover/:id", SongsController.getUrl(ESongFiles.cover));
 
-// Get song metadata by id
-router.get("/:id", songsController.getSong);
+router.get("/cover", GenericController.manageIdRequiredInRoutes)
 
-// Create and load songs and metadata
+router.get("/download/:id", SongsController.downloadSong)
+
+router.get("/:id", SongsController.getSong);
+
+router.get("/", SongsController.getSongs);
+
 router.post(
   "/",
-  upload.fields([
+  HandleUploadError([
     { name: "cover", maxCount: 1 },
     { name: "song", maxCount: 1 },
   ]),
-  songsController.createSong
+  SongsController.createSong
 );
 
-// Update metadata of song
-router.patch("/:id", upload.single("cover"), songsController.updateSong);
+router.patch(
+  "/:id",
+  HandleUploadError([{ name: "cover", maxCount: 1 }]),
+  SongsController.updateSong
+);
 
-// Delete song and metadata
-router.delete("/:id", songsController.deleteSong);
+router.delete("/:id", SongsController.deleteSong);
 
 export default router;

@@ -1,11 +1,13 @@
 import multer from "multer"
 
+import { MAXFILESIZE } from "../config"
+
 const storage = multer.memoryStorage()
 
 const upload = multer({
     storage,
     limits: {
-        fileSize: 2147483648 // 2 GiB in bytes
+        fileSize: MAXFILESIZE
     }
 })
 

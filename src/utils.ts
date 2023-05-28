@@ -1,48 +1,52 @@
-import path from "path";
-
-import S3Storage from "./libs/s3";
-import { HeadBucketCommand } from "@aws-sdk/client-s3";
-import { BUCKET_NAME } from "./config";
+import { TimeoutError } from "./libs/errors";
 
 export function convertStrTolist(
-  stringToConvert: string,
+  stringToConvert: string | undefined,
   delimiter?: string
 ): string[] {
-  const list: string[] = stringToConvert.trim().split(delimiter ?? ",");
+  if (stringToConvert) {
+    const list: string[] = stringToConvert.trim().split(delimiter ?? ",");
 
-  list.forEach((element, i) => {
-    list[i] = element.trim();
+    list.forEach((element, i) => {
+      list[i] = element.trim();
+    });
+
+    return list;
+  }
+
+  return [];
+}
+
+export function filterFields(
+  fields: object,
+  permittedFields: string[]
+): Record<string, any> {
+  const filteredFields: Record<string, any> = {};
+
+  Object.keys(fields).forEach((field) => {
+    if (permittedFields.includes(field)) {
+      filteredFields[field] = (fields as any)[field];
+    }
   });
 
-  return list;
+  return filteredFields;
 }
 
-export function getFileType(filename: string) {
-  const extension = path.extname(filename);
-
-  if (extension === ".mp3") {
-    return "audio/mpeg";
-  } else if (extension === ".wav") {
-    return "audio/wav";
-  } else if (extension === ".ogg") {
-    return "audio/ogg";
-  }
-}
-
-export function createMongooseSelectObject(permittedFileds: string[]) {
-  return permittedFileds.reduce((obj, field) => ({ ...obj, [field]: 1 }), {});
-}
-
-export async function checkS3ServiceStatus() {
+export async function timeout(time: number, command: any): Promise<any> {
   try {
-    const storage = new S3Storage();
+    const result = await Promise.race([
+      command,
+      new Promise<void>((_, reject) => {
+        setTimeout(
+          () =>
+            reject(new TimeoutError("Operation expired, because it has taken too long to respond")),
+          time
+        );
+      }),
+    ]);
 
-    await storage.client.send(new HeadBucketCommand({ Bucket: BUCKET_NAME }));
-
-    // if service is availble return true
-    return true;
-  } catch {
-    // if an unknow error occured, return false
-    return false;
+    return result;
+  } catch (error) {
+    throw error;
   }
 }

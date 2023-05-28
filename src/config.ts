@@ -8,3 +8,4 @@ export const DB_HOST = process.env.DB_HOST
 export const DB_DATABASE = process.env.DB_DATABASE
 export const DB_USER = process.env.DB_USER
 export const DB_PASSWORD = process.env.DB_PASSWORD
+export const MAXFILESIZE = Number(process.env.MAXFILESIZE) || 2 * 1024 * 1024 * 1024 // 2 GiB in bytes

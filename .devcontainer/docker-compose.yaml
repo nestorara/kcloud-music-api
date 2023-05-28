@@ -16,6 +16,7 @@ services:
       - BUCKET_SECRET_KEY=${BUCKET_SECRET_KEY}
       - BUCKET_ENDPOINT=${BUCKET_ENDPOINT}
       - BUCKET_REGION=${BUCKET_REGION}
+      #- MAXFILESIZE=${MAXFILESIZE}
     ports:
       - ${PORT}:${PORT}
     volumes:

@@ -3,6 +3,7 @@ import {
   PutObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Readable } from "stream";
@@ -16,22 +17,14 @@ import {
   BUCKET_SECRET_KEY,
   BUCKET_ENDPOINT,
 } from "../config";
-import {
-  IDownloadFileResult,
-  IFile,
-  IGetFileURLResult,
-  IResult,
-  IUploadFileResult,
-  IUploadFilesResult,
-  IUploadedFiles,
-} from "../types_and_interfaces";
-import { errorCodes, handleS3Error } from "./errorsHandler";
+import { IFile, IRequestFile } from "../types";
+import { FileNotFoundError, NotIsaRedableError } from "./errors";
+import { timeout } from "../utils";
+import { s3ErrorHandler } from "./s3ErrorHandler";
 
 class S3Storage {
   client: S3Client;
-  totalUploadedUnsucessfully: number;
-  uploadedFiles: IUploadedFiles[];
-  totalDeletedUnsucessfully: number;
+  timeout: number;
 
   constructor() {
     this.client = new S3Client({
@@ -44,12 +37,10 @@ class S3Storage {
       forcePathStyle: true,
     });
 
-    this.totalUploadedUnsucessfully = 0;
-    this.uploadedFiles = [];
-    this.totalDeletedUnsucessfully = 0;
+    this.timeout = 30;
   }
 
-  async uploadFile(file: IFile): Promise<IUploadFileResult> {
+  async uploadFile(file: IRequestFile): Promise<string> {
     const { size, buffer, originalname } = file;
     const extension = path.extname(originalname);
     const filename = uuid() + extension;
@@ -65,171 +56,114 @@ class S3Storage {
       };
 
       const command = new PutObjectCommand(params);
-      await this.client.send(command);
 
-      return {
-        success: true,
-        message: "File successfully uploaded",
-        errorCode: errorCodes.none,
-        filename,
-      };
-    } catch (e) {
-      //return handleS3Error(e)
-      return {
-        success: false,
-        message: "An unknown error occurred while processing the request",
-        errorCode: errorCodes.unknown,
-      };
+      timeout(300, this.client.send(command));
+
+      return filename;
+    } catch (error: any) {
+      throw s3ErrorHandler(error, "Error uploading file");
     }
   }
 
-  // todo: Change code to end upload files when one error ocurred
-  async uploadFiles(files: IFile[]): Promise<IUploadFilesResult> {
-    for (let i = 0; i < files.length; i++) {
-      const result = await this.uploadFile(files[i]);
-
-      if (!result.success) {
-        this.totalUploadedUnsucessfully++;
-      } else {
-        this.uploadedFiles.push({
-          originalname: files[i].originalname,
-          filename: result.filename ?? "",
-        });
-      }
-    }
-
-    if (this.totalUploadedUnsucessfully > 0) {
-      return {
-        success: false,
-        message: `${this.totalUploadedUnsucessfully} file/s have not been uploaded because one or more errors ocurred`,
-        errorCode: errorCodes.unknown,
-      };
-    } else {
-      return {
-        success: true,
-        message: "All files have been successfully uploaded",
-        errorCode: errorCodes.none,
-        files: this.uploadedFiles,
-      };
-    }
-  }
-
-  // todo: Implement not found errors
-  async deleteFile(filename: string): Promise<IResult> {
-    const params = {
-      Bucket: BUCKET_NAME,
-      Key: filename,
-    };
-
+  async deleteFile(filename: string): Promise<void> {
     try {
+      const fileExist = await this.fileExist(filename);
+
+      if (!fileExist) {
+        throw new FileNotFoundError(
+          "An error occurred while deleting the file: file does not exist"
+        );
+      }
+
+      const params = {
+        Bucket: BUCKET_NAME,
+        Key: filename,
+      };
+
       const command = new DeleteObjectCommand(params);
-      await this.client.send(command);
-
-      return {
-        success: true,
-        message: "File successfully deleted",
-        errorCode: errorCodes.none,
-      };
-    } catch (e) {
-      console.error(e);
-      return {
-        success: false,
-        message: "An unknow error occurred while deleting the file",
-        errorCode: errorCodes.unknown,
-      };
+      timeout(this.timeout, this.client.send(command));
+    } catch (error: any) {
+      s3ErrorHandler(error, "Error deleting file");
     }
   }
 
-  // todo: Implement not found errors, change code to end delete files when one error ocurred
-  async deleteFiles(filenames: string[]): Promise<IResult> {
-    for (let i = 0; i < filenames.length; i++) {
-      const result = await this.deleteFile(filenames[i]);
-
-      if (!result.success) {
-        this.totalDeletedUnsucessfully++;
-      }
-    }
-
-    if (this.totalDeletedUnsucessfully > 0) {
-      return {
-        success: false,
-        message: `${this.totalDeletedUnsucessfully} file/s have not been deleted because one or more errors ocurred`,
-        errorCode: errorCodes.unknown,
-      };
-    } else {
-      return {
-        success: true,
-        message: "All files have been deleted successfully",
-        errorCode: errorCodes.none,
-      };
-    }
-  }
-
-  // todo: Implement not found errors
-  async downloadFile(filename: string): Promise<IDownloadFileResult> {
-    const params = {
-      Bucket: BUCKET_NAME,
-      Key: filename,
-    };
-
-    const command = new GetObjectCommand(params);
-
+  async downloadFile(filename: string): Promise<IFile> {
     try {
-      const { ContentLength, Body } = await this.client.send(command);
+      const fileExist = await this.fileExist(filename);
 
-      if (Body instanceof Readable) {
-        return {
-          success: true,
-          message: "File successfully recovered",
-          errorCode: errorCodes.none,
-          size: ContentLength,
-          data: Body,
-        };
+      if (!fileExist) {
+        throw new FileNotFoundError(
+          "Error downloading file: file does not exist"
+        );
       }
 
-      return {
-        success: false,
-        message: "The file does not appear to be a Redable",
-        errorCode: errorCodes.notIsaRedable,
+      const params = {
+        Bucket: BUCKET_NAME,
+        Key: filename,
       };
-    } catch (e) {
-      console.error(e);
-      return {
-        success: false,
-        message: "An unknow error occurred while downloading the file",
-        errorCode: errorCodes.unknown,
-      };
+
+      const command = new GetObjectCommand(params);
+      const file = await timeout(this.timeout, this.client.send(command));
+
+      if (file.Body instanceof Readable) {
+        return {
+          fileSize: file.ContentLength!,
+          fileData: file.Body,
+        };
+      } else {
+        throw new NotIsaRedableError(
+          "The file does not appear to be a Redable"
+        );
+      }
+    } catch (error: any) {
+      throw s3ErrorHandler(error, "Error downloading file");
     }
   }
 
-  // todo: implement not found errors
   async getFileURL(
     filename: string,
-    expiresIn: number
-  ): Promise<IGetFileURLResult> {
-    const params = {
-      Bucket: BUCKET_NAME,
-      Key: filename,
-    };
-
-    const command = new GetObjectCommand(params);
-
+    expiresIn: number = 60 * 4 // 4 minutes
+  ): Promise<string> {
     try {
+      const params = {
+        Bucket: BUCKET_NAME,
+        Key: filename,
+      };
+
+      const fileExist = await this.fileExist(filename);
+
+      if (!fileExist) {
+        throw new FileNotFoundError(
+          "Error generating file url: file does not exist"
+        );
+      }
+
+      const command = new GetObjectCommand(params);
       const url = await getSignedUrl(this.client, command, { expiresIn });
-      return {
-        success: true,
-        message: "URL of the file generated succesfully",
-        errorCode: errorCodes.none,
-        url,
+
+      return url;
+    } catch (error: any) {
+      throw s3ErrorHandler(error, "Error generating file url");
+    }
+  }
+
+  async fileExist(filename: string): Promise<boolean> {
+    try {
+      const params = {
+        Bucket: BUCKET_NAME,
+        Key: filename,
       };
-    } catch (e) {
-      console.error(e);
-      return {
-        success: false,
-        message:
-          "An unknown error occurred while trying to get the url of the file",
-        errorCode: errorCodes.unknown,
-      };
+
+      const command = new HeadObjectCommand(params);
+      timeout(12, this.client.send(command));
+
+      return true;
+    } catch (error: any) {
+      if (error.name === "NotFound") {
+        return false;
+      } else {
+        throw s3ErrorHandler(error, "Error checking if file exists");
+      }
     }
   }
 }
