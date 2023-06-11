@@ -3,19 +3,19 @@ services:
   kcloud-music-api:
     container_name: kcloud-music-api
     hostname: kcloud-music-api
-    image: node:18.16.0
+    image: node:18
     command: /bin/sh -c "sleep infinity"
-    environment:
-      - DB_HOST=${DB_HOST}
-      - DB_DATABASE=${DB_DATABASE}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - PORT=${PORT}
-      - BUCKET_NAME=${BUCKET_NAME}
-      - BUCKET_ACCESS_KEY=${BUCKET_ACCESS_KEY}
-      - BUCKET_SECRET_KEY=${BUCKET_SECRET_KEY}
-      - BUCKET_ENDPOINT=${BUCKET_ENDPOINT}
-      - BUCKET_REGION=${BUCKET_REGION}
+    #environment:
+      #- DB_HOST=${DB_HOST}
+      #- DB_DATABASE=${DB_DATABASE}
+      #- DB_USER=${DB_USER}
+      #- DB_PASSWORD=${DB_PASSWORD}
+      #- PORT=${PORT}
+      #- BUCKET_NAME=${BUCKET_NAME}
+      #- BUCKET_ACCESS_KEY=${BUCKET_ACCESS_KEY}
+      #- BUCKET_SECRET_KEY=${BUCKET_SECRET_KEY}
+      #- BUCKET_ENDPOINT=${BUCKET_ENDPOINT}
+      #- BUCKET_REGION=${BUCKET_REGION}
       #- MAXFILESIZE=${MAXFILESIZE}
     ports:
       - ${PORT}:${PORT}

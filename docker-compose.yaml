@@ -1,0 +1,14 @@
+version: "3"
+services:
+  api:
+    env_file: ".env"
+    image: nestor/songs-api:latest
+    container_name: api
+    hostname: api
+    networks:
+      api_devcontainer_default:
+    ports:
+      - 4000:3000
+
+networks:
+  api_devcontainer_default:

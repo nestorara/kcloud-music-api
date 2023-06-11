@@ -1,6 +1,26 @@
 import { Schema, model } from "mongoose";
 import { ISong } from "../types";
 
+const song_fileSchema = new Schema(
+  {
+    fileName: {
+      type: String,
+      required: true,
+    },
+    size: {
+      type: Number,
+      required: true,
+    },
+    mimetype: {
+      type: String,
+      required: true,
+    },
+  },
+  {
+    _id: false,
+  }
+);
+
 const songSchema = new Schema(
   {
     name: {
@@ -10,11 +30,8 @@ const songSchema = new Schema(
     genres: [String],
     artists: [String],
     albums: [String],
-    songFile: {
-      type: String,
-      required: true,
-    },
-    cover: String,
+    songFile: song_fileSchema,
+    cover: song_fileSchema,
     accountId: {
       type: String,
       required: true,

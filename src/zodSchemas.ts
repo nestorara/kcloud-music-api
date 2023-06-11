@@ -8,7 +8,8 @@ export const songSchema = z
     name: z
       .string({
         required_error: "The name field is required",
-        invalid_type_error: "The name field must be a string and not appear more than 1 time",
+        invalid_type_error:
+          "The name field must be a string and not appear more than 1 time",
       })
       .nonempty("The name of the song cannot be empty"),
     genres: z
@@ -34,7 +35,8 @@ export const songSchema = z
     accountId: z
       .string({
         required_error: "The accountId field is required",
-        invalid_type_error: "The accountId field must be a string and not appear more than 1 time",
+        invalid_type_error:
+          "The accountId field must be a string and not appear more than 1 time",
       })
       .nonempty(
         "The accoundId of the account associated to the song cannot be empty"
@@ -79,14 +81,16 @@ export const Song_ReqFilesSchema = z
   })
   .partial();
 
+export const Song_CreateReqFilesSchema = Song_ReqFilesSchema.required({
+  song: true,
+});
+
 // Validate if is a file and customize errors
 export const validateFile = (file: any) => {
   const result = fileSchema.safeParse(file);
 
   if (!result.success) {
     result.error.issues.find((issue) => {
-      const fieldName = issue.path[0].toString();
-
       if (
         issue.code === z.ZodIssueCode.invalid_type &&
         issue.received === "undefined"
@@ -108,6 +112,8 @@ export const validateFile = (file: any) => {
         ]);
       }
     });
+  } else {
+    return file;
   }
 };
 
@@ -152,7 +158,7 @@ export const validateReqFiles = (
     const errors = Object.values(issues);
 
     throw new ZodError(errors.flatMap((error) => error.issues));
+  } else {
+    return RequestFile;
   }
-
-  return RequestFile;
 };

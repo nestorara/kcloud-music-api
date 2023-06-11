@@ -1,21 +1,32 @@
 import { Request, Response } from "express";
 
-import { ESongFiles, EerrorCodes, IRequestFile, IRequestFiles } from "../types";
+import { EerrorCodes, IRequestFile, IRequestFiles, ISong } from "../types";
 import S3Storage from "../libs/s3";
 import Song from "../models/song";
-import { convertStrTolist, filterFields } from "../utils";
 import {
-  Song_ReqFilesSchema,
+  modelUtils,
+  convertStrTolist,
+  filterFields,
+  ValidFileType,
+  getExtensionOfMimetype,
+} from "../utils";
+import {
+  Song_CreateReqFilesSchema,
   createSongSchema,
   mongodb_idSchema,
   updateSongSchema,
   validateFile,
   validateReqFiles,
 } from "../zodSchemas";
-import { FileNotFoundError, TimeoutError, UnknownError, generateDataValidationResponseError } from "../libs/errors";
-import { ZodError } from "zod";
+import {
+  FileNotFoundError,
+  UnknownError,
+  generateResponseClientError,
+} from "../libs/errors";
 
 const storage = new S3Storage();
+
+const songUtils = new modelUtils(Song);
 
 const displayFields = [
   "_id",
@@ -32,14 +43,12 @@ export async function getSongs(req: Request, res: Response) {
     const songs = await Song.find().select(displayFields);
     return res.json(songs);
   } catch (error) {
-    if (error instanceof ZodError) {
-      return generateDataValidationResponseError(res, error);
-    } else {
-      return res.status(500).json({
-        message: "An unknown error occurred while getting the songs",
-        errorCode: EerrorCodes.unknown,
-      });
-    }
+    const response = generateResponseClientError(
+      error,
+      "Error retrieving songs: unknown error"
+    );
+
+    return res.status(response.status).json(response.error);
   }
 }
 
@@ -49,25 +58,16 @@ export async function getSong(req: Request, res: Response) {
 
     mongodb_idSchema.parse(id);
 
-    const song = await Song.findById(id).select(displayFields);
-
-    if (!song) {
-      return res.status(404).json({
-        message: "The song doesn't exist",
-        errorCode: EerrorCodes.songNotExist,
-      });
-    }
+    const song = await songUtils.findById(id, displayFields, "song", "getSong");
 
     return res.json(song);
   } catch (error) {
-    if (error instanceof ZodError) {
-      return generateDataValidationResponseError(res, error);
-    } else {
-      return res.status(500).json({
-        message: "An unknown error occurred while getting the song",
-        errorCode: EerrorCodes.unknown,
-      });
-    }
+    const response = generateResponseClientError(
+      error,
+      "Error retrieving the song"
+    );
+
+    return res.status(response.status).json(response.error);
   }
 }
 
@@ -85,59 +85,67 @@ export async function createSong(req: Request, res: Response) {
 
     const files = req.files as IRequestFiles;
 
-    const RequestFilesSchema = Song_ReqFilesSchema.required({
-      song: true,
-    });
-
     // Validate if the files comply with the expected schema and are files
-    validateReqFiles(files, RequestFilesSchema, ["song", "cover"]);
+    validateReqFiles(files, Song_CreateReqFilesSchema, ["song", "cover"]);
 
-    let data = {};
+    let newSong = new Song({
+      name,
+      genres,
+      artists,
+      albums,
+      accountId: accountId,
+    });
 
     const song = files.song[0] as IRequestFile;
 
-    const songUploaded = await storage.uploadFile(song);
+    ValidFileType("audio", song, "song", "createSong");
 
     if (files["cover"]) {
       const cover = files.cover[0] as IRequestFile;
 
+      ValidFileType("image", cover, "cover", "createSong");
+
       const coverUploaded = await storage.uploadFile(cover);
 
-      data = {
-        name,
-        genres,
-        artists,
-        albums,
-        songFile: songUploaded,
-        cover: coverUploaded,
-        accountId,
-      };
-    } else {
-      data = {
-        name,
-        genres,
-        artists,
-        albums,
-        songFile: songUploaded,
-        accountId,
+      newSong.cover = {
+        fileName: coverUploaded,
+        size: cover.size,
+        mimetype: cover.mimetype,
       };
     }
 
-    const newSong = new Song(data);
+    const songUploaded = await storage.uploadFile(song);
+
+    newSong.songFile = {
+      fileName: songUploaded,
+      size: song.size,
+      mimetype: song.mimetype,
+    };
 
     newSong.save();
 
-    const finalSong = await Song.findById(newSong._id).select(displayFields);
+    const finalSong = await songUtils.findById(
+      newSong._id,
+      displayFields,
+      "song",
+      "createSong"
+    );
 
     return res.json(finalSong);
-  } catch (e: any) {
-    if (e instanceof ZodError) {
-      return generateDataValidationResponseError(res, e);
-    } else {
+  } catch (error) {
+    if (error instanceof UnknownError && error.action === "uploadFile") {
       return res.status(500).json({
-        message: "An unknown error occurred while creating the song",
-        errorCode: EerrorCodes.unknown,
+        message:
+          "Error creating the song: unable to upload files due to unknown error",
+        errorCode: EerrorCodes.UnknownError,
       });
+    } else {
+      const response = generateResponseClientError(
+        error,
+        "Error creating song"
+      );
+
+      return res.status(response.status).json(response.error);
     }
   }
 }
@@ -154,25 +162,24 @@ export async function updateSong(req: Request, res: Response) {
 
     const fieldsToUpdate = filterFields(req.body, permittedFields);
 
+    // if the form is empty and the client doesn't provide any file or the file field is empty, then return error
     if (
       (!fieldsToUpdate || Object.keys(fieldsToUpdate).length === 0) &&
       (!req.files || Object.keys(req.files).length === 0)
     ) {
       return res.status(400).json({
         message:
-          "At least one field must be provided to update or the name of the provided properties are invalid",
-        errorCode: EerrorCodes.validationDataError,
+          "Error updating song: At least one field must be provided to update or the name of the provided properties are invalid",
+        errorCode: EerrorCodes.ValidationDataError,
       });
     }
 
-    const song = await Song.findById(id);
-
-    if (!song) {
-      return res.status(404).json({
-        message: "The song provided doesn't exist",
-        errorCode: EerrorCodes.songNotExist,
-      });
-    }
+    const song = (await songUtils.findById(
+      id,
+      undefined,
+      "song",
+      "updateSong"
+    )) as ISong;
 
     const files = req.files as IRequestFiles;
 
@@ -182,29 +189,56 @@ export async function updateSong(req: Request, res: Response) {
       // Check if cover is a valid file
       validateFile(cover);
 
+      ValidFileType("image", cover, "cover", "updateSong");
+
       const coverUploaded = await storage.uploadFile(cover);
 
-      if (song.cover) {
-        await storage.deleteFile(song.cover);
+      const oldCoverFileName = song.get("cover")?.fileName;
+
+      try {
+        await storage.deleteFile(oldCoverFileName);
+      } catch (error) {
+        if (
+          !(error instanceof UnknownError) &&
+          !(error instanceof FileNotFoundError)
+        ) {
+          throw error;
+        }
       }
 
-      fieldsToUpdate["cover"] = coverUploaded;
+      fieldsToUpdate["cover"] = {
+        fileName: coverUploaded,
+        size: cover.size,
+        mimetype: cover.mimetype,
+      };
     }
 
-    const updatedSong = await Song.findByIdAndUpdate(id, fieldsToUpdate, {
-      new: true,
-      fields: "_id name genres artists albums createdAt updatedAt",
-    });
+    const updatedSong = await songUtils.findByIdAndUpdate(
+      id,
+      displayFields,
+      "song",
+      "updateSong",
+      fieldsToUpdate,
+      {
+        new: true,
+      }
+    );
 
     return res.json(updatedSong);
   } catch (error) {
-    if (error instanceof ZodError) {
-      return generateDataValidationResponseError(res, error);
-    } else {
+    if (error instanceof UnknownError && error.action === "uploadFile") {
       return res.status(500).json({
-        message: "An unknown error occurred while updating the song",
-        errorCode: EerrorCodes.unknown,
+        message:
+          "Error updating song: unable to upload new cover due to unknown error",
+        errorCode: EerrorCodes.UnknownError,
       });
+    } else {
+      const response = generateResponseClientError(
+        error,
+        "Error updating song"
+      );
+
+      return res.status(response.status).json(response.error);
     }
   }
 }
@@ -212,140 +246,46 @@ export async function updateSong(req: Request, res: Response) {
 export async function deleteSong(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const song = await Song.findById(id).select(displayFields);
 
-    if (!song) {
-      return res.status(404).json({
-        message: "The song doesn't exist",
-        errorCode: EerrorCodes.songNotExist,
-      });
-    }
+    const song = (await songUtils.findByIdAndDelete(
+      id,
+      undefined,
+      "song",
+      "deleteSong"
+    )) as ISong;
+
+    const songFileName = song.get("songFile").fileName;
 
     try {
-      await storage.deleteFile(song.songFile);
-    } catch (e: any) {
-      if (e.errorCode === EerrorCodes.fileNotFound) {
-        return res.status(404).json({
-          message:
-            "The song could not be deleted because the song file could not be found",
-          errorCode: EerrorCodes.fileNotFound,
-        });
-      } else if (e.errorCode === EerrorCodes.unknown) {
-        return res.status(500).json({
-          message:
-            "The song could not be deleted because an unknown error occurred while deleting the song file",
-          errorCode: EerrorCodes.unknownErrorInFileReference,
-        });
-      } else {
-        throw e;
-      }
-    }
-
-    await Song.findByIdAndRemove(id);
-
-    // Check if cover length is not zero (!! convert result to boolean)
-    if (!!song.cover?.length) {
-      try {
-        await storage.deleteFile(song.cover!);
-      } catch (error) {
-        if (error instanceof FileNotFoundError) {
-          return res.json({
-            message:
-              "The song has been deleted successfully, but the song cover could not be deleted because the reference file could not be found",
-            errorCode: EerrorCodes.fileReferenceNotFound,
-            song: song,
-          });
-        } else if (error instanceof UnknownError) {
-          return res.json({
-            message:
-              "The song was successfully deleted, but the song cover could not be deleted due to an unknown error",
-            errorCode: EerrorCodes.unknownErrorInFileReference,
-            song: song,
-          });
-        } else {
-          throw error;
-        }
-      }
-    }
-
-    return res.json({
-      message: "song deleted successfully",
-      errorCode: EerrorCodes.none,
-      song: song,
-    });
-  } catch (e: any) {
-    if (e instanceof ZodError) {
-      return generateDataValidationResponseError(res, e);
-    } else {
-      return res.status(500).json({
-        message: "An unknown error occurred while deleting the song",
-        errorCode: EerrorCodes.unknown,
-      });
-    }
-  }
-}
-
-export function getUrl(resource: ESongFiles) {
-  return async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-
-      mongodb_idSchema.parse(id);
-
-      const song = await Song.findById(id);
-
-      if (!song) {
-        return res.status(404).json({
-          message: "The song doesn't exist",
-          errorCode: EerrorCodes.songNotExist,
-        });
-      }
-
-      const url = await storage.getFileURL(song[resource]!);
-
-      return res.json({
-        message: "The url of the song generatted successfully",
-        errorCode: EerrorCodes.none,
-        url,
-      });
+      await storage.deleteFile(songFileName);
     } catch (error) {
-      if (error instanceof ZodError) {
-        return generateDataValidationResponseError(res, error);
-      } else {
-        return res.status(500).json({
-          message:
-            "An unknown error occurred while getting the url of the file",
-          errorCode: EerrorCodes.unknown,
-        });
+      if (
+        !(error instanceof UnknownError) &&
+        !(error instanceof FileNotFoundError)
+      ) {
+        throw error;
       }
     }
-  };
-}
 
-export async function downloadSong(req: Request, res: Response) {
-  try {
-    const { id } = req.params;
+    const coverFileName = song.get("cover")?.fileName;
 
-    const song = await Song.findById(id);
-
-    const songAudio = await storage.downloadFile(song?.songFile!);
-
-    res.send("Hola");
-  } catch (error) {
-    if (error instanceof FileNotFoundError) {
-      return res.status(404).json({
-        message:
-          "The song could not be downloaded because the song file could not be found",
-        errorCode: EerrorCodes.fileReferenceNotFound,
-      });
-    } else if (error instanceof TimeoutError) {
-      return res.status(408).json({
-        message:
-          "The song could not be downloaded because the server takes too long to respond",
-        errorCode: EerrorCodes.timeout,
-      });
-    } else {
-      return res.status(500).json(error);
+    try {
+      await storage.deleteFile(coverFileName);
+    } catch (error) {
+      if (
+        !(error instanceof UnknownError) &&
+        !(error instanceof FileNotFoundError)
+      ) {
+        throw error;
+      }
     }
+
+    const songFilter = songUtils.filterDocument(song, displayFields);
+
+    return res.json(songFilter);
+  } catch (error) {
+    const response = generateResponseClientError(error, "Error deleting song");
+
+    return res.status(response.status).json(response.error);
   }
 }

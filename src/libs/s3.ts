@@ -4,6 +4,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  HeadBucketCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Readable } from "stream";
@@ -18,9 +19,12 @@ import {
   BUCKET_ENDPOINT,
 } from "../config";
 import { IFile, IRequestFile } from "../types";
-import { FileNotFoundError, NotIsaRedableError } from "./errors";
-import { timeout } from "../utils";
-import { s3ErrorHandler } from "./s3ErrorHandler";
+import {
+  NotIsRedableError,
+  S3ServiceNotAvailableError,
+  TimeoutError,
+  s3ErrorHandler,
+} from "./errors";
 
 class S3Storage {
   client: S3Client;
@@ -37,10 +41,14 @@ class S3Storage {
       forcePathStyle: true,
     });
 
-    this.timeout = 30;
+    this.timeout = 300 * 1000; // 5 min
   }
 
-  async uploadFile(file: IRequestFile): Promise<string> {
+  async uploadFile(
+    file: IRequestFile,
+    resourceName?: string,
+    action: string = "uploadFile"
+  ): Promise<string> {
     const { size, buffer, originalname } = file;
     const extension = path.extname(originalname);
     const filename = uuid() + extension;
@@ -57,23 +65,21 @@ class S3Storage {
 
       const command = new PutObjectCommand(params);
 
-      timeout(300, this.client.send(command));
+      await this.executeS3Command(this.timeout, command, resourceName, action);
 
       return filename;
-    } catch (error: any) {
-      throw s3ErrorHandler(error, "Error uploading file");
+    } catch (error) {
+      throw s3ErrorHandler(error, "Error uploading file", resourceName, action);
     }
   }
 
-  async deleteFile(filename: string): Promise<void> {
+  async deleteFile(
+    filename: string,
+    resourceName?: string,
+    action: string = "deleteFile"
+  ): Promise<void> {
     try {
-      const fileExist = await this.fileExist(filename);
-
-      if (!fileExist) {
-        throw new FileNotFoundError(
-          "An error occurred while deleting the file: file does not exist"
-        );
-      }
+      await this.checkfileExist(filename, resourceName, action);
 
       const params = {
         Bucket: BUCKET_NAME,
@@ -81,21 +87,24 @@ class S3Storage {
       };
 
       const command = new DeleteObjectCommand(params);
-      timeout(this.timeout, this.client.send(command));
-    } catch (error: any) {
-      s3ErrorHandler(error, "Error deleting file");
+      await this.executeS3Command(
+        30 * 1000 /* 30 segundos */,
+        command,
+        resourceName,
+        action
+      );
+    } catch (error) {
+      s3ErrorHandler(error, "Error deleting file", resourceName, action);
     }
   }
 
-  async downloadFile(filename: string): Promise<IFile> {
+  async downloadFile(
+    filename: string,
+    resourceName?: string,
+    action: string = "downloadFile"
+  ): Promise<IFile> {
     try {
-      const fileExist = await this.fileExist(filename);
-
-      if (!fileExist) {
-        throw new FileNotFoundError(
-          "Error downloading file: file does not exist"
-        );
-      }
+      await this.checkfileExist(filename, resourceName, action);
 
       const params = {
         Bucket: BUCKET_NAME,
@@ -103,7 +112,12 @@ class S3Storage {
       };
 
       const command = new GetObjectCommand(params);
-      const file = await timeout(this.timeout, this.client.send(command));
+      const file = await this.executeS3Command(
+        this.timeout,
+        command,
+        resourceName,
+        action
+      );
 
       if (file.Body instanceof Readable) {
         return {
@@ -111,18 +125,27 @@ class S3Storage {
           fileData: file.Body,
         };
       } else {
-        throw new NotIsaRedableError(
-          "The file does not appear to be a Redable"
+        throw new NotIsRedableError(
+          "The file doesn't appear to be a Redable",
+          resourceName,
+          action
         );
       }
-    } catch (error: any) {
-      throw s3ErrorHandler(error, "Error downloading file");
+    } catch (error) {
+      throw s3ErrorHandler(
+        error,
+        "Error downloading file",
+        resourceName,
+        action
+      );
     }
   }
 
   async getFileURL(
     filename: string,
-    expiresIn: number = 60 * 4 // 4 minutes
+    expiresIn: number = 60 * 4 /* 4 min */,
+    resourceName?: string,
+    action: string = "getFileURL"
   ): Promise<string> {
     try {
       const params = {
@@ -130,24 +153,27 @@ class S3Storage {
         Key: filename,
       };
 
-      const fileExist = await this.fileExist(filename);
-
-      if (!fileExist) {
-        throw new FileNotFoundError(
-          "Error generating file url: file does not exist"
-        );
-      }
+      await this.checkfileExist(filename, resourceName, action);
 
       const command = new GetObjectCommand(params);
       const url = await getSignedUrl(this.client, command, { expiresIn });
 
       return url;
-    } catch (error: any) {
-      throw s3ErrorHandler(error, "Error generating file url");
+    } catch (error) {
+      throw s3ErrorHandler(
+        error,
+        "Error generating file url",
+        resourceName,
+        action
+      );
     }
   }
 
-  async fileExist(filename: string): Promise<boolean> {
+  async checkfileExist(
+    filename: string,
+    resourceName?: string,
+    action: string = "checkfileExist"
+  ): Promise<boolean> {
     try {
       const params = {
         Bucket: BUCKET_NAME,
@@ -155,15 +181,70 @@ class S3Storage {
       };
 
       const command = new HeadObjectCommand(params);
-      timeout(12, this.client.send(command));
+      await this.executeS3Command(
+        12 * 1000 /* 12 sec */,
+        command,
+        resourceName,
+        action
+      );
 
       return true;
-    } catch (error: any) {
-      if (error.name === "NotFound") {
-        return false;
-      } else {
-        throw s3ErrorHandler(error, "Error checking if file exists");
-      }
+    } catch (error) {
+      throw s3ErrorHandler(
+        error,
+        "Error checking if file exists",
+        resourceName,
+        action
+      );
+    }
+  }
+
+  async CheckServiceStatus(): Promise<boolean> {
+    try {
+      const params = {
+        Bucket: BUCKET_NAME,
+      };
+
+      const storage = new S3Storage();
+
+      const command = new HeadBucketCommand(params);
+
+      await storage.client.send(command);
+
+      // if service is availble return true
+      return true;
+    } catch {
+      throw new S3ServiceNotAvailableError("storage service not available");
+    }
+  }
+
+  async executeS3Command(
+    time: number,
+    command: any,
+    resourceName?: string,
+    action: string = "executeS3Command"
+  ): Promise<any> {
+    try {
+      const result = await Promise.race([
+        this.client.send(command),
+        new Promise<void>((_, reject) => {
+          setTimeout(
+            () =>
+              reject(
+                new TimeoutError(
+                  "Error executing s3 command: storage service takes too long to respond",
+                  resourceName,
+                  action
+                )
+              ),
+            time
+          );
+        }),
+      ]);
+
+      return result;
+    } catch (error) {
+      throw error;
     }
   }
 }

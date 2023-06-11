@@ -14,25 +14,29 @@ function HandleUploadError(fields: multerField[]) {
       if (error) {
         if (error instanceof MulterError) {
           if (error.code === "LIMIT_UNEXPECTED_FILE") {
-            const repeatedField = fields.find((field) => field.name === error.field);
-  
+            const repeatedField = fields.find(
+              (field) => field.name === error.field
+            );
+
             return res.status(400).json({
               message: `the ${error.field} field cannot appear more than ${repeatedField?.maxCount} time/s`,
-              errorCode: EerrorCodes.duplicateFields,
+              errorCode: EerrorCodes.DuplicateFieldsError,
             });
           }
 
           if (error.code === "LIMIT_FILE_SIZE") {
             return res.status(500).json({
               message: `The file in the ${error.field} field exceeds the maximux size, size in bytes is: ${MAXFILESIZE}`,
-              errorCode: EerrorCodes.fileSizeLimit,
-              size: MAXFILESIZE
+              errorCode: EerrorCodes.FileSizeLimitError,
+              size: MAXFILESIZE,
             });
           }
         } else {
+          console.error(error);
+
           return res.status(500).json({
             message: "Unknow error while processing the files",
-            errorCode: EerrorCodes.unknown,
+            errorCode: EerrorCodes.UnknownError,
           });
         }
       }

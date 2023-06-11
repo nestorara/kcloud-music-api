@@ -1,9 +1,12 @@
-import app from "./app"
-import { PORT } from "./config"
-import "./db"
+import app from "./app";
+import { PORT } from "./config";
+import "./db";
+import { checkRequiredEnvVariables } from "./utils";
 
-app.set("port", PORT)
+checkRequiredEnvVariables()
+
+app.set("port", PORT);
 
 app.listen(app.get("port"), () => {
-    console.log("Running app on port", app.get("port"))
-})
+  console.log("Running app on port", app.get("port"));
+});
