@@ -1,3 +1,4 @@
-.devcontainer/.env
+.devcontainer
 .env
 node_modules
+dist

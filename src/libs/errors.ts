@@ -82,6 +82,12 @@ export class UnsupportedFileTypeError extends BaseError {
   }
 }
 
+export class S3AccessDeniedError extends BaseError {
+  constructor(message: string, resourceName?: string, action?: string) {
+    super(message, EerrorCodes.S3AccessDeniedError, resourceName, action);
+  }
+}
+
 // Management errors
 
 // Generates an error based on the class on which it is based (error classes describe errors occurring during the operation)
@@ -95,7 +101,10 @@ export function generateIResponseError(
       resource: error.resourceName,
       errorCode: EerrorCodes.TimeoutError,
     };
-  } else if (error instanceof S3ServiceNotAvailableError) {
+  } else if (
+    error instanceof S3ServiceNotAvailableError ||
+    error instanceof S3AccessDeniedError
+  ) {
     return {
       message: `${message}: storage service not available`,
       resource: error.resourceName,
@@ -150,7 +159,7 @@ export function s3ErrorHandler(
 ): void {
   if (error instanceof TimeoutError) {
     throw new TimeoutError(
-      `${message}: server takes too long to respond`,
+      `${message}: storage service takes too long to respond `,
       resourceName,
       action
     );
@@ -164,7 +173,10 @@ export function s3ErrorHandler(
       resourceName,
       action
     );
-  } else if (error.name === "NotFound" || error instanceof FileNotFoundError) {
+  } else if (
+    (error.$metadata && error.$metadata.httpStatusCode === 404) ||
+    error instanceof FileNotFoundError
+  ) {
     throw new FileNotFoundError(
       `${message}: file doesn't exist`,
       resourceName,
@@ -176,7 +188,17 @@ export function s3ErrorHandler(
       resourceName,
       action
     );
+  } else if (
+    (error.$metadata && error.$metadata.httpStatusCode === 403) ||
+    error instanceof S3AccessDeniedError
+  ) {
+    throw new S3AccessDeniedError(
+      `${message}: Access denied to the storage service, check permission of access account`,
+      resourceName,
+      action
+    );
   } else {
+    console.error(error);
     throw new UnknownError(`${message}: unknow error`, resourceName, action);
   }
 }

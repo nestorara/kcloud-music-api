@@ -8,7 +8,6 @@ import {
   convertStrTolist,
   filterFields,
   ValidFileType,
-  getExtensionOfMimetype,
 } from "../utils";
 import {
   Song_CreateReqFilesSchema,
@@ -98,14 +97,14 @@ export async function createSong(req: Request, res: Response) {
 
     const song = files.song[0] as IRequestFile;
 
-    ValidFileType("audio", song, "song", "createSong");
+    ValidFileType("audio", song, "song");
 
     if (files["cover"]) {
       const cover = files.cover[0] as IRequestFile;
 
-      ValidFileType("image", cover, "cover", "createSong");
+      ValidFileType("image", cover, "cover");
 
-      const coverUploaded = await storage.uploadFile(cover);
+      const coverUploaded = await storage.uploadFile(cover, "cover");
 
       newSong.cover = {
         fileName: coverUploaded,
@@ -122,14 +121,9 @@ export async function createSong(req: Request, res: Response) {
       mimetype: song.mimetype,
     };
 
-    newSong.save();
+    await newSong.save();
 
-    const finalSong = await songUtils.findById(
-      newSong._id,
-      displayFields,
-      "song",
-      "createSong"
-    );
+    const finalSong = songUtils.filterDocument(newSong, displayFields)
 
     return res.json(finalSong);
   } catch (error) {
@@ -189,7 +183,7 @@ export async function updateSong(req: Request, res: Response) {
       // Check if cover is a valid file
       validateFile(cover);
 
-      ValidFileType("image", cover, "cover", "updateSong");
+      ValidFileType("image", cover, "cover");
 
       const coverUploaded = await storage.uploadFile(cover);
 

@@ -1,6 +1,6 @@
 {
   "name": "kcloud-music-api",
-  "version": "0.1.0",
+  "version": "beta0.2.0",
   "description": "API to management kcloud music service",
   "main": "index.js",
   "scripts": {

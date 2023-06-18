@@ -21,6 +21,7 @@ export enum EerrorCodes {
   // When the resource has no assigned value or it is empty
   EmptyResourceError = "EMPTYRESOURCEERROR",
   DisabledFunctionalitieError = "DISABLEDFUNCTIONALITIEERROR",
+  S3AccessDeniedError = "S3ACCESSDENIEDERROR",
 }
 
 export interface IRequestFiles {

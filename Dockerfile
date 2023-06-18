@@ -1,6 +1,6 @@
 FROM node:18 as builder
 
-ENV NODE_ENV dev
+ENV NODE_ENV=dev
 
 # Create app directory
 WORKDIR /usr/src/app
@@ -17,7 +17,7 @@ RUN npm run build
 
 FROM node:18
 
-ENV NODE_ENV production
+ENV NODE_ENV=production
 
 WORKDIR /app
 

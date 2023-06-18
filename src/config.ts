@@ -17,4 +17,3 @@ export const MAXFILESIZE =
 export const SHARED_MUSIC = process.env.SHARED_MUSIC
   ? strToBoolean(process.env.SHARED_MUSIC)
   : false;
-export const NODE_ENV = process.env.NODE_ENV || "production";

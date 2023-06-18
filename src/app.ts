@@ -4,7 +4,6 @@ import songs from "./routes/songs";
 import generic from "./routes/generic";
 import checkDBStatus from "./middlewares/checkDBStatus";
 import HandleExpressErrors from "./middlewares/HandleExpressErrors";
-import { NODE_ENV } from "./config";
 
 const app = express();
 
@@ -20,5 +19,8 @@ app.use(generic);
 
 // middlewares after processing request
 app.use(HandleExpressErrors);
+
+// Disable express internal cache
+app.disable('etag')
 
 export default app;

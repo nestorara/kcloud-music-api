@@ -1,14 +1,31 @@
 version: "3"
 services:
   api:
-    env_file: ".env"
+    env_file: .env
     image: nestor/songs-api:latest
     container_name: api
     hostname: api
-    networks:
-      api_devcontainer_default:
     ports:
-      - 4000:3000
+      - 3000:3000
 
-networks:
-  api_devcontainer_default:
+  db:
+    image: mongo:latest
+    ports:
+      - 27017:27017
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_configdb:/data/configdb
+
+  minio:
+    env_file: .env
+    image: 'bitnami/minio:latest'
+    ports:
+      - 9000:9000
+      - 9001:9001
+    volumes:
+      - minio:/data
+
+volumes:
+  minio:
+  mongodb_data:
+  mongodb_configdb:
